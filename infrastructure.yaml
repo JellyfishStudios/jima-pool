@@ -1,0 +1,455 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  AWS CloudFormation Template for a VPC containing public and private EC2 Instances
+
+########################################################################
+
+Parameters:
+  #General:
+
+  NamingPrefix:
+    Type: String
+    Description: The naming prefix for resources created by this template.
+    Default: Jima
+
+  # true/false resource switches
+  PublicEnabledParam:
+    Description: 'true if resources to connect VPC to internet should be deployed'
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: true
+
+  EC2SecurityEnabledParam:
+    Description: 'true if resources necessary for EC2 security should be deployed'
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: true
+
+  # IP configuration
+  VPCCidrBlock:
+    Description: 'CIDR IP for VPC'
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicCidrBlock:
+    Description: 'CIDR IP for public subnet'
+    Type: String
+    Default: 10.0.1.0/24
+
+  PrivateCidrBlock:
+    Description: 'CIDR IP for private subnet'
+    Type: String
+    Default: 10.0.2.0/24
+
+  RelayPrivateIPAddress:
+    Type: String
+    Description: Relay node private IP. This ust be a valid IP address for Subnet
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})
+    ConstraintDescription: must be a valid IP address of the form x.x.x.x.
+    Default: 10.0.1.5
+
+  BlockProducerPrivateIPAddress:
+    Type: String
+    Description: Block producer private IP. This ust be a valid IP address for Subnet
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})
+    ConstraintDescription: must be a valid IP address of the form x.x.x.x.
+    Default: 10.0.2.5
+
+  PublicSGSource:
+    Description: The IP address range that can be used to access the relays
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+  #Application Tier
+  LatestAmiId:
+    Description: Gets the latest AMI from Systems Manager Parameter store
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+  RelayNodeInstanceType:
+    Description: Relay Node EC2 instance type
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.nano
+      - t3.medium
+      - t3.large
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  BlockProducerInstanceType:
+    Description: Block Producer EC2 instance type
+    Type: String
+    Default: t3.large
+    AllowedValues:
+      - t3.nano
+      - t3.medium
+      - t3.large
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  RelayNodeKeyName:
+    Description: Name of an existing EC2 KeyPair for SSH access to the relay nodes
+    Type: AWS::EC2::KeyPair::KeyName
+    MinLength: '1'
+    MaxLength: '255'
+    AllowedPattern: "[\\x20-\\x7E]*"
+    ConstraintDescription: can contain only ASCII characters.
+  
+  BlockProducerKeyName:
+    Description: Name of an existing EC2 KeyPair for SSH access to the block producer
+    Type: AWS::EC2::KeyPair::KeyName
+    MinLength: '1'
+    MaxLength: '255'
+    AllowedPattern: "[\\x20-\\x7E]*"
+    ConstraintDescription: can contain only ASCII characters.
+
+  CardanoNodeBootstrap:
+    Description: Relay Node bootstrap script
+    Type: String
+
+
+########################################################################
+
+Conditions:
+  # Create resources to connect VPC to the internet
+  PublicEnabled: !Equals [!Ref PublicEnabledParam, "true"]
+
+  # Create security resources needed for an EC2 instances
+  EC2SecurityEnabled: !Equals [!Ref EC2SecurityEnabledParam, "true"]
+
+########################################################################
+
+Resources:
+
+  ###########
+  # Relay Node - Public
+  ###########
+
+  RelayNode:
+    Type: AWS::EC2::Instance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Relay Node (Zura) 
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref RelayNodeInstanceType
+      KeyName: !Ref RelayNodeKeyName
+      Monitoring: true
+      BlockDeviceMappings:
+        -
+          DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeSize: 256
+            VolumeType: gp2
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          PrivateIpAddress: !Ref RelayPrivateIPAddress
+          DeviceIndex: "0"
+          GroupSet:
+            - Ref: PublicSecurityGroup
+          SubnetId:
+            Ref: PublicSubnet
+      UserData: !Ref CardanoNodeBootstrap
+
+  ###########
+  # Block Producer - Private
+  ###########
+
+  BlockProducer:
+    Type: AWS::EC2::Instance
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Block Producer
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref BlockProducerInstanceType
+      KeyName: !Ref BlockProducerKeyName
+      Monitoring: true
+      BlockDeviceMappings:
+        -
+          DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeSize: 256
+            VolumeType: gp2
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "false"
+          PrivateIpAddress: !Ref BlockProducerPrivateIPAddress
+          DeviceIndex: "0"
+          GroupSet:
+            - Ref: PrivateSecurityGroup
+          SubnetId:
+            Ref: PrivateSubnet
+      UserData: !Ref CardanoNodeBootstrap
+
+  ###########
+  # Elastic IP for our public instance (saves us losing the IP if the server bounces)
+  ###########
+
+  RelayNodeElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref RelayNode
+
+  ###########
+  # VPC with Internet Gateway
+  ###########
+
+  #VPC
+  JimaVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-vpc.html
+      CidrBlock: !Ref VPCCidrBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - VPC
+
+  #Internet Gateway: Allows communication between instances in your VPC and the internet.
+  IGW:
+    Condition: PublicEnabled
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-internetgateway.html
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - IGW
+  IGWAttach:
+    Condition: PublicEnabled
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-vpc-gateway-attachment.html
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref JimaVPC
+      InternetGatewayId: !Ref IGW
+      #VpnGatewayId
+
+
+  ###########
+  # Route Table to Internet
+  ###########
+
+  # Route to/from Internet
+  InternetRoute:
+    Condition: PublicEnabled
+    Type: AWS::EC2::Route
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-route.html
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+      RouteTableId: !Ref InternetRouteTable
+
+  InternetRouteTable:
+    Condition: PublicEnabled
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-route-table.html
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref JimaVPC
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - Public
+              - RTB
+
+  ###########
+  # Subnets
+  ###########
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-subnet.html
+    Properties:
+      VpcId: !Ref JimaVPC
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-getavailabilityzones.html
+          Ref: 'AWS::Region'
+      CidrBlock: !Ref PrivateCidrBlock
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - Private
+              - 1
+
+  PublicSubnet:
+    Condition: PublicEnabled
+    Type: AWS::EC2::Subnet
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-subnet.html
+    Properties:
+      VpcId: !Ref JimaVPC
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-getavailabilityzones.html
+          Ref: 'AWS::Region'
+      CidrBlock: !Ref PublicCidrBlock
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - Public
+              - 1
+
+  PublicSubnetRouteToInternet:
+    Condition: PublicEnabled
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    #https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ec2-subnet-route-table-assoc.html
+    DependsOn:
+      - PublicSubnet
+      - InternetRouteTable
+    Properties:
+      RouteTableId: !Ref InternetRouteTable
+      SubnetId: !Ref PublicSubnet
+
+###########
+# App Security Groups
+###########
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EC2SecurityEnabled
+    Properties:
+      VpcId: !Ref JimaVPC
+      GroupName: !Join
+        - '-'
+        - - !Ref NamingPrefix
+          - Private-SG
+      GroupDescription: >-
+        Lock down everything except limited (in/out) for Relay Nodes
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref RelayPrivateIPAddress
+        - IpProtocol: tcp
+          FromPort: '6000'
+          ToPort: '6000'
+          CidrIp: !Ref RelayPrivateIPAddress
+        - IpProtocol: tcp
+          FromPort: '9100'
+          ToPort: '9100'
+          CidrIp: !Ref RelayPrivateIPAddress
+        - IpProtocol: tcp
+          FromPort: '12798'
+          ToPort: '12798'
+          CidrIp: !Ref RelayPrivateIPAddress
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: '6000'
+          ToPort: '6000'
+          CidrIp: !Ref RelayPrivateIPAddress
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - Private-SG
+
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EC2SecurityEnabled
+    Properties:
+      VpcId: !Ref JimaVPC
+      GroupName: !Join
+        - '-'
+        - - !Ref NamingPrefix
+          - Public-SG
+      GroupDescription: >-
+        Enable for specific ports to/from allowed PUBLIC CIDR
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '6000'
+          ToPort: '6000'
+          CidrIp: !Ref VPCCidrBlock
+        - IpProtocol: tcp
+          FromPort: '9100'
+          ToPort: '9100'
+          CidrIp: !Ref VPCCidrBlock
+        - IpProtocol: tcp
+          ToPort: '12798'
+          CidrIp: !Ref VPCCidrBlock
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref PublicSGSource
+        - IpProtocol: tcp
+          FromPort: '3000'
+          ToPort: '3000'
+          CidrIp: !Ref PublicSGSource
+        - IpProtocol: tcp
+          FromPort: '6000'
+          ToPort: '6000'
+          CidrIp: !Ref PublicSGSource
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref NamingPrefix
+              - SG
+
+########################################################################
+
+Outputs:
+  JimaVPCId:
+    Value: !Ref JimaVPC
+  RelayNodeDNS:
+    Value: !GetAtt RelayNode.PublicDnsName
+  RelayNodePrivateDNS:
+    Value: !GetAtt RelayNode.PrivateDnsName
+  BlockProducerPrivateDNS:
+    Value: !GetAtt BlockProducer.PrivateDnsName
+
+########################################################################
+# Metadata is used to group and order how the CloudFormation parameters are
+# displayed when you deploy the template using the AWS Console
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Naming"
+        Parameters:
+          - NamingPrefix
+      -
+        Label:
+          default: "true/false switches"
+        Parameters:
+          - PublicEnabledParam
+          - EC2SecurityEnabledParam
+      -
+        Label:
+          default: "IP configuration (CIDR)"
+        Parameters:
+          - VPCCidrBlock
+          - PublicCidrBlock
+          - PublicSGSource
+          - BlockProducerPrivateIPAddress
+      -
+        Label:
+          default: "EC2 configuration"
+        Parameters:
+          - LatestAmiId
+          - RelayNodeInstanceType
+          - RelayNodeInstanceType
+          - BlockProducerInstanceType
+          - BlockProducerKeyName
+          - CardanoNodeBootstrap
