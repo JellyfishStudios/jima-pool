@@ -1,7 +1,8 @@
-# Jima
-Jima, a Cardano stakepool hosted on AWS in Japan.
+# Cardano Jima
 
-#### Deploy a new stack (green)
+Cardao Jima, a Cardano stakepool hosted on AWS in Japan.
+
+#### Deploy a new stack (blue/green deployment)
 
 aws cloudformation create-stack --stack-name Jima \
 	--region ap-northeast-1 \
@@ -11,4 +12,4 @@ aws cloudformation create-stack --stack-name Jima \
 		ParameterKey=RelayNodeKeyName,ParameterValue=RelayNodes \
 		ParameterKey=BlockProducerInstanceType,ParameterValue=t3.large \
 		ParameterKey=BlockProducerKeyName,ParameterValue=BlockProducer \
-		ParameterKey=CardanoNodeBootstrap,ParameterValue=$(bootstrap/cardanonode.sh)
+		ParameterKey=CardanoNodeBootstrap,ParameterValue=$(base64 artifacts/cardanonode.sh)
