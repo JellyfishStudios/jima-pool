@@ -5,8 +5,6 @@ Description: >-
 ########################################################################
 
 Parameters:
-  #General:
-
   NamingPrefix:
     Type: String
     Description: The naming prefix for resources created by this template.
@@ -159,7 +157,7 @@ Resources:
       UserData: !Ref CardanoNodeBootstrap
 
   ###########
-  # Block Producer - Private
+  # Block Producer
   ###########
 
   BlockProducer:
