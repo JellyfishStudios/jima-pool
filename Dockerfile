@@ -4,19 +4,26 @@ RUN yum update -y && \
     yum -y install sudo \
     yum install shadow-utils
 
-RUN adduser appuser && \
-    echo "appuser ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/appuser && \
-    chmod 0440 /etc/sudoers.d/appuser
+RUN adduser adanode && \
+    echo "adanode ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/adanode && \
+    chmod 0440 /etc/sudoers.d/adanode
 
-# Set working directory to install folder, we will move all install scripts here
-WORKDIR /install
+# Swtich to adanode
+USER adanode
 
-# Copy over install scripts
-COPY scripts/cardanonode-install.sh ./
-RUN chmod +x cardanonode-install.sh
+# Set working directory to users home
+WORKDIR /home/adanode
 
-# Swtich to appuser
-USER appuser
+# Copy over install & configuration scripts
+COPY install/ ./install/
+COPY utility/ ./utility/
 
-# Install Cardano node
-RUN ./cardanonode-install.sh
+# Scripts need to be executable
+RUN sudo chmod -R +x utility/
+RUN sudo chmod -R +x install/
+
+# Install & configure Cardano node
+RUN ./install/cardanonode-install.sh
+
+# Install & configure Grafana node
+RUN ./install/grafana-install.sh
