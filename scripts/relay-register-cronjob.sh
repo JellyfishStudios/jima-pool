@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ######
 ##
@@ -7,7 +7,8 @@
 ######
 
 cat > $NODE_HOME/crontab-fragment.txt << EOF
-33 * * * * ${NODE_HOME}/topologyUpdater.sh
+33 * * * * ${NODE_HOME}/relay-register.sh
 EOF
+
 crontab -l | cat - crontab-fragment.txt >crontab.txt && crontab crontab.txt
 rm crontab-fragment.txt
