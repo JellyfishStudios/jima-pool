@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # shellcheck disable=SC2086,SC2034
 
 ######
@@ -13,7 +13,7 @@ CNODE_HOSTNAME="CHANGE ME"  # optional. must resolve to the IP you are requestin
 CNODE_BIN="/usr/local/bin"
 CNODE_HOME=$NODE_HOME
 CNODE_LOG_DIR="\${CNODE_HOME}/logs"
-GENESIS_JSON="\${CNODE_HOME}/${NODE_CONFIG}-shelley-genesis.json"
+GENESIS_JSON="\${CNODE_HOME}/config/${NODE_CONFIG}-shelley-genesis.json"
 NETWORKID=\$(jq -r .networkId \$GENESIS_JSON)
 CNODE_VALENCY=1   # optional for multi-IP hostnames
 NWMAGIC=\$(jq -r .networkMagic < \$GENESIS_JSON)
@@ -21,9 +21,9 @@ NWMAGIC=\$(jq -r .networkMagic < \$GENESIS_JSON)
 [[ "\${NWMAGIC}" = "1097911063" ]] && NETWORK_IDENTIFIER="--mainnet" || NETWORK_IDENTIFIER="--testnet-magic \${NWMAGIC}"
  
 export PATH="\${CNODE_BIN}:\${PATH}"
-export CARDANO_NODE_SOCKET_PATH="\${CNODE_HOME}/db/socket"
+export CARDANO_NODE_SOCKET_PATH="\${CNODE_HOME}/config/db/socket"
  
-blockNo=\$(/usr/local/bin/cardano-cli query tip \${NETWORK_IDENTIFIER} | jq -r .block )
+blockNo=\$(cardano-cli query tip \${NETWORK_IDENTIFIER} | jq -r .block )
  
 # Note:
 # if you run your node in IPv4/IPv6 dual stack network configuration and want announced the
